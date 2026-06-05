@@ -1,0 +1,21 @@
+# Runtime data
+data/
+logs/
+tmp/
+keys/
+
+# Local secrets
+*.secret
+*.key
+id_rsa*
+
+# Python cache
+__pycache__/
+pycache/
+*.py[cod]
+
+# Editor / OS files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
