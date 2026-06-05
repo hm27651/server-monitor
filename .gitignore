@@ -4,9 +4,7 @@ logs/
 tmp/
 keys/
 
-# Local real configuration and secrets
-agent/config.sh
-master/config.sh
+# Local secrets
 *.secret
 *.key
 id_rsa*

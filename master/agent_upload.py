@@ -20,8 +20,8 @@ import shutil
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-FEISHU_APP_TOKEN = os.environ.get("FEISHU_APP_TOKEN", "L7DrboAJ3ao5ZxsPjcocEDnAnUm")
-FEISHU_TABLE_ID = os.environ.get("FEISHU_TABLE_ID", "tblARXvHKVEepDhV")
+FEISHU_APP_TOKEN = os.environ.get("FEISHU_APP_TOKEN", "")
+FEISHU_TABLE_ID = os.environ.get("FEISHU_TABLE_ID", "")
 FEISHU_ACCESS_TOKEN = os.environ.get("FEISHU_ACCESS_TOKEN", "")
 FEISHU_APP_ID = os.environ.get("FEISHU_APP_ID", "")
 FEISHU_APP_SECRET = os.environ.get("FEISHU_APP_SECRET", "")
@@ -611,6 +611,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
 
 
