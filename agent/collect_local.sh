@@ -170,6 +170,15 @@ print(json.dumps(result))
 collect_disk_list() {
     local cmd='python3 -c "
 import json, subprocess
+
+def smartctl_info(device):
+    for cmd in ([\"sudo\", \"-n\", \"smartctl\", \"-i\", device], [\"smartctl\", \"-i\", device]):
+        try:
+            return subprocess.check_output(cmd, text=True, stderr=subprocess.DEVNULL)
+        except Exception:
+            continue
+    return \"\"
+
 result = []
 try:
     lsblk = subprocess.check_output([\"lsblk\", \"-d\", \"-o\", \"NAME,TYPE,SIZE\", \"-n\"], text=True)
@@ -183,15 +192,12 @@ try:
             dev_type = parts[1] if len(parts) > 1 else \"disk\"
             size = parts[2] if len(parts) > 2 else \"N/A\"
             disk_info = {\"device\": device, \"type\": dev_type.upper(), \"vendor\": \"Unknown\", \"size\": size, \"sn\": \"N/A\"}
-            try:
-                sn = subprocess.check_output([\"smartctl\", \"-i\", device], text=True, stderr=subprocess.DEVNULL)
-                for sn_line in sn.split(\"\\n\"):
-                    if \"Serial Number\" in sn_line:
-                        disk_info[\"sn\"] = sn_line.split(\":\")[-1].strip()
-                    if \"Vendor\" in sn_line:
-                        disk_info[\"vendor\"] = sn_line.split(\":\")[-1].strip()
-            except Exception:
-                pass
+            sn = smartctl_info(device)
+            for sn_line in sn.split(\"\\n\"):
+                if \"Serial Number\" in sn_line:
+                    disk_info[\"sn\"] = sn_line.split(\":\", 1)[-1].strip()
+                if \"Vendor\" in sn_line or \"Model Number\" in sn_line or \"Device Model\" in sn_line:
+                    disk_info[\"vendor\"] = sn_line.split(\":\", 1)[-1].strip()
             try:
                 rot = subprocess.check_output([\"cat\", \"/sys/block/\" + device_name + \"/queue/rotational\"], text=True)
                 disk_info[\"type\"] = \"HDD\" if rot.strip() == \"1\" else \"SSD\"
@@ -207,7 +213,105 @@ print(json.dumps(result))
 
 collect_disk_smart() {
     local cmd='python3 -c "
-import json, subprocess
+import json, re, subprocess
+
+def run_smartctl(args):
+    for prefix in ([\"sudo\", \"-n\"], []):
+        try:
+            return subprocess.check_output(prefix + [\"smartctl\"] + args, text=True, stderr=subprocess.STDOUT)
+        except Exception:
+            continue
+    return \"\"
+
+def run_nvme_smart_log(device):
+    for prefix in ([\"sudo\", \"-n\"], []):
+        try:
+            return subprocess.check_output(prefix + [\"nvme\", \"smart-log\", device, \"-o\", \"json\"], text=True, stderr=subprocess.STDOUT)
+        except Exception:
+            continue
+    return \"\"
+
+def parse_nvme_smart_log(output):
+    try:
+        data = json.loads(output)
+    except Exception:
+        return {\"status\": \"N/A\", \"temperature\": \"N/A\"}
+    critical_warning = data.get(\"critical_warning\", 0)
+    media_errors = data.get(\"media_errors\", 0)
+    status = \"PASS\"
+    try:
+        if int(critical_warning) != 0 or int(media_errors) != 0:
+            status = \"WARN\"
+    except Exception:
+        pass
+    temp = data.get(\"temperature\")
+    if isinstance(temp, (int, float)):
+        if temp > 200:
+            temp = round(temp - 273.15)
+        temp = str(int(temp))
+    elif temp is None:
+        temp = \"N/A\"
+    else:
+        match = re.search(r\"(-?\\d+)\", str(temp))
+        temp = match.group(1) if match else \"N/A\"
+    return {\"status\": status, \"temperature\": temp}
+
+def parse_json_smart(output):
+    data = json.loads(output)
+    status = \"PASS\"
+    smart_status = data.get(\"smartctl\", {}).get(\"exit_status\", 0)
+    if smart_status & 0x01:
+        status = \"FAIL\"
+    if data.get(\"smart_status\", {}).get(\"passed\") is False:
+        status = \"FAIL\"
+    temp = \"N/A\"
+    for attr in data.get(\"ata_smart_attributes\", {}).get(\"table\", []):
+        if attr.get(\"name\") in (\"Temperature_Celsius\", \"Airflow_Temperature_Cel\") or attr.get(\"id\") in (190, 194):
+            raw = attr.get(\"raw\", {})
+            if isinstance(raw, dict) and raw.get(\"value\") is not None:
+                temp = str(raw.get(\"value\"))
+            else:
+                temp = str(attr.get(\"current\", \"N/A\"))
+            break
+    if temp == \"N/A\":
+        nvme = data.get(\"nvme_smart_health_information_log\", {})
+        if isinstance(nvme, dict) and nvme.get(\"temperature\") is not None:
+            temp = str(nvme.get(\"temperature\"))
+    if temp == \"N/A\":
+        nvme_temp = data.get(\"temperature\", {})
+        if isinstance(nvme_temp, dict):
+            temp = str(nvme_temp.get(\"current\", \"N/A\"))
+        elif isinstance(nvme_temp, (int, float)):
+            temp = str(nvme_temp)
+    return {\"status\": status, \"temperature\": temp}
+
+def parse_text_smart(output):
+    if not output:
+        return {\"status\": \"N/A\", \"temperature\": \"N/A\"}
+    status = \"PASS\"
+    lowered = output.lower()
+    if \"smart overall-health self-assessment test result: failed\" in lowered:
+        status = \"FAIL\"
+    if \"read nvme smart/health information failed\" in lowered:
+        status = \"N/A\"
+    temp = \"N/A\"
+    for line in output.split(\"\\n\"):
+        if \"Temperature_Celsius\" in line or \"Airflow_Temperature_Cel\" in line:
+            parts = line.split()
+            if len(parts) >= 10:
+                match = re.search(r\"(-?\\d+)\", parts[9])
+            else:
+                match = re.search(r\"-\\s+(-?\\d+)\", line)
+            if match:
+                temp = match.group(1)
+            break
+        if line.strip().startswith(\"Temperature:\"):
+            match = re.search(r\"(-?\\d+)\", line)
+            if match:
+                temp = match.group(1)
+            break
+    return {\"status\": status, \"temperature\": temp}
+
 result = {}
 try:
     lsblk = subprocess.check_output([\"lsblk\", \"-d\", \"-o\", \"NAME\", \"-n\"], text=True)
@@ -217,28 +321,21 @@ try:
             continue
         device = \"/dev/\" + device_name
         try:
-            smart = subprocess.check_output([\"smartctl\", \"-A\", \"-j\", device], text=True, stderr=subprocess.DEVNULL)
-            data = json.loads(smart)
-            status = \"PASS\"
-            smart_status = data.get(\"smartctl\", {}).get(\"exit_status\", 0)
-            if smart_status & 0x01:
-                status = \"FAIL\"
-            if data.get(\"smart_status\", {}).get(\"passed\") is False:
-                status = \"FAIL\"
-            temp = \"N/A\"
-            for attr in data.get(\"ata_smart_attributes\", {}).get(\"table\", []):
-                if attr.get(\"name\") == \"Temperature_Celsius\" or attr.get(\"id\") == 194:
-                    temp = str(attr.get(\"current\", \"N/A\"))
-                    break
-            if temp == \"N/A\":
-                nvme_temp = data.get(\"temperature\", {})
-                if isinstance(nvme_temp, dict):
-                    temp = str(nvme_temp.get(\"current\", \"N/A\"))
-                elif isinstance(nvme_temp, (int, float)):
-                    temp = str(nvme_temp)
-            result[device] = {\"status\": status, \"temperature\": temp}
+            smart = run_smartctl([\"-A\", \"-j\", device])
+            if smart.strip().startswith(\"{\"):
+                result[device] = parse_json_smart(smart)
+            else:
+                result[device] = parse_text_smart(run_smartctl([\"-A\", device]))
+            if result[device].get(\"temperature\") == \"N/A\" and device_name.startswith(\"nvme\"):
+                nvme = parse_nvme_smart_log(run_nvme_smart_log(device))
+                if nvme.get(\"temperature\") != \"N/A\":
+                    result[device] = nvme
         except Exception:
-            result[device] = {\"status\": \"N/A\", \"temperature\": \"N/A\"}
+            result[device] = parse_text_smart(run_smartctl([\"-A\", device]))
+            if result[device].get(\"temperature\") == \"N/A\" and device_name.startswith(\"nvme\"):
+                nvme = parse_nvme_smart_log(run_nvme_smart_log(device))
+                if nvme.get(\"temperature\") != \"N/A\":
+                    result[device] = nvme
 except Exception:
     pass
 print(json.dumps(result))
