@@ -104,6 +104,69 @@ except Exception:
     ssh_remote "${cmd}"
 }
 
+collect_cpu_temperature() {
+    local cmd='python3 -c "
+import os, re, subprocess
+
+def normalize_temp(value):
+    try:
+        temp = float(value)
+    except (TypeError, ValueError):
+        return None
+    if 0 <= temp <= 130:
+        return temp
+    return None
+
+def collect_from_sensors():
+    preferred = []
+    fallback = []
+    try:
+        output = subprocess.check_output([\"sensors\"], text=True, stderr=subprocess.DEVNULL)
+    except Exception:
+        return []
+    for line in output.split(\"\\n\"):
+        match = re.search(r\"([+-]?\\d+(?:\\.\\d+)?)\\s*°?C\", line)
+        if not match:
+            continue
+        temp = normalize_temp(match.group(1))
+        if temp is None:
+            continue
+        if re.search(r\"Package|Tctl|Tdie|CPU|Core\", line, re.IGNORECASE):
+            preferred.append(temp)
+        else:
+            fallback.append(temp)
+    return preferred or fallback
+
+def collect_from_sysfs():
+    temps = []
+    base = \"/sys/class/thermal\"
+    try:
+        zones = sorted(name for name in os.listdir(base) if name.startswith(\"thermal_zone\"))
+    except Exception:
+        return temps
+    for zone in zones:
+        temp_path = os.path.join(base, zone, \"temp\")
+        try:
+            raw = open(temp_path, \"r\", encoding=\"utf-8\").read().strip()
+            value = float(raw)
+            if value > 1000:
+                value = value / 1000.0
+            temp = normalize_temp(value)
+            if temp is not None:
+                temps.append(temp)
+        except Exception:
+            continue
+    return temps
+
+temps = collect_from_sensors() or collect_from_sysfs()
+if temps:
+    print(f\"{max(temps):.0f}\")
+else:
+    print(\"N/A\")
+"'
+    ssh_remote "${cmd}"
+}
+
 collect_memory_info() {
     local cmd='python3 -c "
 mem = {}
@@ -454,14 +517,16 @@ format_json() {
     local net_tx="${13}"
     local loadavg="${14}"
     local processes="${15}"
+    local cpu_temp="${16:-N/A}"
     local timestamp
     timestamp="$(date -Iseconds)"
 
-    local timestamp_json host_json node_name_json cpu_model_json
+    local timestamp_json host_json node_name_json cpu_model_json cpu_temp_json
     timestamp_json="$(json_quote "${timestamp}")"
     host_json="$(json_quote "${REMOTE_HOST}")"
     node_name_json="$(json_quote "${NODE_NAME}")"
     cpu_model_json="$(json_quote "${cpu_model}")"
+    cpu_temp_json="$(json_quote "${cpu_temp:-N/A}")"
 
     cpu_usage="$(valid_number_or_zero "${cpu_usage:-0}")"
     mem_total_kb="$(valid_number_or_zero "${mem_total_kb:-0}")"
@@ -494,6 +559,7 @@ format_json() {
       "cores": ${cpu_cores}
     },
     "cpu_usage_percent": ${cpu_usage},
+    "cpu_temperature": ${cpu_temp_json},
     "memory": {
       "total_kb": ${mem_total_kb},
       "used_kb": ${mem_used_kb}
@@ -548,7 +614,7 @@ main_collect() {
         return 1
     fi
 
-    local cpu_model="未知" cpu_cores="0" cpu_usage="0"
+    local cpu_model="未知" cpu_cores="0" cpu_usage="0" cpu_temp="N/A"
     local mem_total="0" mem_used="0" mem_usage="0"
     local disk_list="[]" disk_usage="{}" disk_smart="{}"
     local gpu_list="[]" gpu_usage="[]"
@@ -562,6 +628,9 @@ main_collect() {
 
     collect_with_retry cpu_usage collect_cpu_usage
     cpu_usage="${cpu_usage:-0}"
+
+    collect_with_retry cpu_temp collect_cpu_temperature
+    cpu_temp="${cpu_temp:-N/A}"
 
     local mem_line=""
     collect_with_retry mem_line collect_memory_info
@@ -609,7 +678,7 @@ main_collect() {
         "${mem_total}" "${mem_used}" "${mem_usage}" \
         "${disk_list}" "${disk_usage}" "${disk_smart}" \
         "${gpu_list}" "${gpu_usage}" \
-        "${net_rx}" "${net_tx}" "${loadavg}" "${processes}")"
+        "${net_rx}" "${net_tx}" "${loadavg}" "${processes}" "${cpu_temp}")"
 
     local ts
     ts="$(date '+%Y%m%d_%H%M%S')"
@@ -622,7 +691,7 @@ main_collect() {
     fi
     log_info "数据已保存到: ${output_file}"
 
-    log_info "CPU: ${cpu_model} (${cpu_cores}核) ${cpu_usage}%"
+    log_info "CPU: ${cpu_model} (${cpu_cores}核) ${cpu_usage}% Temp: ${cpu_temp}°C"
     log_info "内存: ${mem_usage}%"
     log_info "磁盘: $(echo "${disk_usage}" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(", ".join([f"{k}:{v}%" for k,v in d.items()]))' 2>/dev/null || echo 'N/A')"
 

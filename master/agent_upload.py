@@ -29,8 +29,10 @@ FEISHU_TOKEN_EXPIRES_AT = 0.0
 
 FEISHU_FIELD_TIME = os.environ.get("FEISHU_FIELD_TIME", "时间")
 FEISHU_FIELD_IP = os.environ.get("FEISHU_FIELD_IP", "IP地址")
+FEISHU_FIELD_DEVICE_NAME = os.environ.get("FEISHU_FIELD_DEVICE_NAME", "设备名称")
 FEISHU_FIELD_CPU_INFO = os.environ.get("FEISHU_FIELD_CPU_INFO", "CPU信息")
 FEISHU_FIELD_CPU_USAGE = os.environ.get("FEISHU_FIELD_CPU_USAGE", "CPU使用率")
+FEISHU_FIELD_CPU_TEMP = os.environ.get("FEISHU_FIELD_CPU_TEMP", "CPU温度")
 FEISHU_FIELD_MEMORY = os.environ.get("FEISHU_FIELD_MEMORY", "内存")
 FEISHU_FIELD_MEM_USAGE = os.environ.get("FEISHU_FIELD_MEM_USAGE", "内存使用率")
 FEISHU_FIELD_DISK_LIST = os.environ.get("FEISHU_FIELD_DISK_LIST", "磁盘列表")
@@ -89,6 +91,17 @@ def to_float(value: Any, default: float = 0.0) -> float:
 
 def format_percent(value: Any) -> str:
     return f"{to_float(value):.1f}%"
+
+
+def format_cpu_temperature(value: Any) -> str:
+    if value is None:
+        return "N/A"
+    text = str(value).strip()
+    if not text or text.upper() == "N/A":
+        return "N/A"
+    if text.endswith("°C"):
+        return text
+    return f"{text.rstrip('C').strip()}°C"
 
 
 def format_cpu_info(metrics: Dict[str, Any]) -> str:
@@ -210,8 +223,10 @@ def parse_server_data(json_path: str) -> Dict[str, Any]:
     return {
         "time": format_timestamp(data.get("timestamp")),
         "ip": str(data.get("host") or data.get("node_name") or ""),
+        "device_name": str(data.get("node_name") or data.get("host") or ""),
         "cpu_info": format_cpu_info(metrics),
         "cpu_usage": format_percent(metrics.get("cpu_usage_percent")),
+        "cpu_temperature": format_cpu_temperature(metrics.get("cpu_temperature")),
         "memory": format_memory(metrics),
         "mem_usage": format_percent(metrics.get("memory_usage_percent")),
         "disk_list": format_disk_list(metrics.get("disks")),
@@ -226,8 +241,10 @@ def format_for_feishu(record: Dict[str, Any]) -> Dict[str, Any]:
     field_map = {
         "time": FEISHU_FIELD_TIME,
         "ip": FEISHU_FIELD_IP,
+        "device_name": FEISHU_FIELD_DEVICE_NAME,
         "cpu_info": FEISHU_FIELD_CPU_INFO,
         "cpu_usage": FEISHU_FIELD_CPU_USAGE,
+        "cpu_temperature": FEISHU_FIELD_CPU_TEMP,
         "memory": FEISHU_FIELD_MEMORY,
         "mem_usage": FEISHU_FIELD_MEM_USAGE,
         "disk_list": FEISHU_FIELD_DISK_LIST,
