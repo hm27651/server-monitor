@@ -355,52 +355,96 @@ def parse_text_smart(output):
     lowered = output.lower()
     if \"smart overall-health self-assessment test result: failed\" in lowered:
         status = \"FAIL\"
-    if \"read nvme smart/health information failed\" in lowered:
+    warn_patterns = (\"read nvme smart/health information failed\", \"input/output error\", \"permission denied\")
+    if any(pattern in lowered for pattern in warn_patterns):
+        status = \"WARN\"
+    if \"smart support is:     unavailable\" in lowered or \"device lacks smart capability\" in lowered:
         status = \"N/A\"
     temp = \"N/A\"
-    for line in output.split(\"\\n\"):
+    for line in output.split(\"\n\"):
+        if \"Current Drive Temperature\" in line:
+            match = re.search(r\"(-?\d+)\s*C\", line)
+            if match:
+                temp = match.group(1)
+            break
         if \"Temperature_Celsius\" in line or \"Airflow_Temperature_Cel\" in line:
             parts = line.split()
             if len(parts) >= 10:
-                match = re.search(r\"(-?\\d+)\", parts[9])
+                match = re.search(r\"(-?\d+)\", parts[9])
             else:
-                match = re.search(r\"-\\s+(-?\\d+)\", line)
+                match = re.search(r\"-\s+(-?\d+)\", line)
             if match:
                 temp = match.group(1)
             break
         if line.strip().startswith(\"Temperature:\"):
-            match = re.search(r\"(-?\\d+)\", line)
+            match = re.search(r\"(-?\d+)\", line)
             if match:
                 temp = match.group(1)
             break
     return {\"status\": status, \"temperature\": temp}
 
+def collect_standard_device(result, device_name):
+    device = \"/dev/\" + device_name
+    try:
+        smart = run_smartctl([\"-A\", \"-j\", device])
+        if smart.strip().startswith(\"{\"):
+            result[device] = parse_json_smart(smart)
+        else:
+            result[device] = parse_text_smart(run_smartctl([\"-A\", device]))
+        if result[device].get(\"temperature\") == \"N/A\" and device_name.startswith(\"nvme\"):
+            nvme = parse_nvme_smart_log(run_nvme_smart_log(device))
+            if nvme.get(\"temperature\") != \"N/A\":
+                result[device] = nvme
+    except Exception:
+        result[device] = parse_text_smart(run_smartctl([\"-A\", device]))
+        if result[device].get(\"temperature\") == \"N/A\" and device_name.startswith(\"nvme\"):
+            nvme = parse_nvme_smart_log(run_nvme_smart_log(device))
+            if nvme.get(\"temperature\") != \"N/A\":
+                result[device] = nvme
+
+def scan_raid_devices():
+    output = run_smartctl([\"--scan-open\"])
+    devices = []
+    seen = set()
+    for line in output.split(\"\n\"):
+        line = line.strip()
+        if not line or line.startswith(\"#\"):
+            continue
+        match = re.match(r\"^(\S+)\s+-d\s+([^\s#]+)\", line)
+        if not match:
+            continue
+        device, dev_type = match.groups()
+        if not (\"megaraid\" in dev_type or \"aacraid\" in dev_type or \"cciss\" in dev_type):
+            continue
+        key = (device, dev_type)
+        if key in seen:
+            continue
+        seen.add(key)
+        devices.append(key)
+    return devices
+
+def collect_raid_device(result, device, dev_type):
+    label = f\"{device}[{dev_type}]\"
+    output = run_smartctl([\"-A\", \"-d\", dev_type, device])
+    result[label] = parse_text_smart(output)
+
 result = {}
 try:
     lsblk = subprocess.check_output([\"lsblk\", \"-d\", \"-o\", \"NAME\", \"-n\"], text=True)
-    for line in lsblk.strip().split(\"\\n\"):
+    for line in lsblk.strip().split(\"\n\"):
         device_name = line.strip()
         if not device_name or device_name.startswith(\"loop\"):
             continue
-        device = \"/dev/\" + device_name
-        try:
-            smart = run_smartctl([\"-A\", \"-j\", device])
-            if smart.strip().startswith(\"{\"):
-                result[device] = parse_json_smart(smart)
-            else:
-                result[device] = parse_text_smart(run_smartctl([\"-A\", device]))
-            if result[device].get(\"temperature\") == \"N/A\" and device_name.startswith(\"nvme\"):
-                nvme = parse_nvme_smart_log(run_nvme_smart_log(device))
-                if nvme.get(\"temperature\") != \"N/A\":
-                    result[device] = nvme
-        except Exception:
-            result[device] = parse_text_smart(run_smartctl([\"-A\", device]))
-            if result[device].get(\"temperature\") == \"N/A\" and device_name.startswith(\"nvme\"):
-                nvme = parse_nvme_smart_log(run_nvme_smart_log(device))
-                if nvme.get(\"temperature\") != \"N/A\":
-                    result[device] = nvme
+        collect_standard_device(result, device_name)
 except Exception:
     pass
+
+try:
+    for raid_device, raid_type in scan_raid_devices():
+        collect_raid_device(result, raid_device, raid_type)
+except Exception:
+    pass
+
 print(json.dumps(result))
 " 2>/dev/null || echo "{}"'
     ssh_remote "${cmd}"
