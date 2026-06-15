@@ -143,6 +143,23 @@ def format_disk_smart(value: Any) -> str:
         if "awk" in text.lower() or "cmd. line" in text.lower():
             return "采集异常"
         return text or "无数据"
+
+    status_health = {
+        "PASS": "正常",
+        "WARN": "关注",
+        "FAIL": "失败",
+        "N/A": "未知",
+        "UNKNOWN": "未知",
+    }
+
+    def present(val: Any) -> bool:
+        return val is not None and str(val).strip() not in ("", "N/A", "None")
+
+    def append_metric(items: List[str], info: Dict[str, Any], key: str, label: str, suffix: str = "") -> None:
+        val = info.get(key)
+        if present(val):
+            items.append(f"{label}={val}{suffix}")
+
     parts = []
     for device, info in sorted(value.items()):
         if isinstance(info, str):
@@ -152,11 +169,21 @@ def format_disk_smart(value: Any) -> str:
             continue
         if not isinstance(info, dict):
             continue
-        status = info.get("status", "UNKNOWN")
-        temp = info.get("temperature", "N/A")
-        parts.append(f"{device}:{status}({temp}°C)")
-    return " | ".join(parts) if parts else "无数据"
 
+        status = str(info.get("status", "UNKNOWN"))
+        health = info.get("health") or status_health.get(status, "未知")
+        items = [f"健康={health}"]
+        append_metric(items, info, "temperature", "温度", "°C")
+        append_metric(items, info, "power_on_hours", "通电", "h")
+        append_metric(items, info, "reallocated_sectors", "重映射")
+        append_metric(items, info, "pending_sectors", "待映射")
+        append_metric(items, info, "uncorrectable_errors", "不可校正")
+        append_metric(items, info, "crc_errors", "CRC")
+        append_metric(items, info, "media_errors", "介质错误")
+        append_metric(items, info, "percentage_used", "寿命已用", "%")
+        append_metric(items, info, "available_spare", "备用", "%")
+        parts.append(f"{device}:" + ",".join(items))
+    return " | ".join(parts) if parts else "无数据"
 
 def format_disk_usage(value: Any) -> str:
     if not value:
