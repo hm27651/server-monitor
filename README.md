@@ -36,6 +36,8 @@ server-monitor/
 │   ├── config.sh              # master 示例配置
 │   ├── config.example.sh      # master 配置模板
 │   └── lib_common.sh
+├── scripts/                    # 安装、升级、卸载脚本
+├── tests/                      # S.M.A.R.T. 解析样本和单元测试
 └── README.md
 ```
 
@@ -77,9 +79,35 @@ RAID 物理盘读取依赖 `smartctl --scan-open` 对控制器的识别能力，
 
 ## 快速开始
 
+### 0. 快速安装（推荐）
+
+agent 节点：
+
+```bash
+bash scripts/install_agent.sh --prefix /share/server-monitor --time 9:30
+```
+
+master 节点：
+
+```bash
+bash scripts/install_master.sh --prefix /share/server-monitor
+```
+
+升级已部署脚本，且保留现有配置、数据、日志和 SSH keys：
+
+```bash
+bash scripts/update.sh --all --prefix /share/server-monitor
+```
+
+卸载脚本但保留数据：
+
+```bash
+bash scripts/uninstall.sh --all --prefix /share/server-monitor
+```
+
 ### 1. 配置 agent
 
-在每台被监控服务器上部署 `agent/`，修改本机配置：
+安装后，在每台被监控服务器上修改本机配置：
 
 ```bash
 cd /share/server-monitor/agent
@@ -202,6 +230,22 @@ agent 每天 09:30 采集，master 每天 09:45 拉取并上传：
 ```cron
 30 9 * * * /share/server-monitor/agent/collect_local.sh >> /share/server-monitor/logs/cron.log 2>&1
 45 9 * * * /share/server-monitor/master/run_monitor.sh --clean-remote >> /share/server-monitor/logs/master_cron.log 2>&1
+```
+
+## 测试
+
+项目内置了 S.M.A.R.T. 样本库和标准库 `unittest` 测试，不需要额外 Python 依赖：
+
+```bash
+python3 -m unittest discover -s tests
+```
+
+基础语法检查：
+
+```bash
+bash -n agent/collect_local.sh
+bash -n master/run_monitor.sh
+python3 -m py_compile agent/collectors/disk_smart.py master/agent_upload.py
 ```
 
 ## 安全说明

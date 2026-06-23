@@ -43,3 +43,35 @@ TMP_DIR="${TMP_DIR:-/share/server-monitor/tmp}"
 # 安全配置
 # -----------------------------------------------------------------------------
 MAX_RETRIES="3"
+
+# =============================================================================
+# 辅助函数
+# =============================================================================
+
+ensure_directories() {
+    mkdir -p "${LOG_DIR}" "${DATA_DIR}" "${TMP_DIR}"
+}
+
+validate_device_name() {
+    local dev="$1"
+    if [[ ! "${dev}" =~ ^[a-zA-Z0-9_/:.+-]+$ ]]; then
+        echo "ERROR: 设备名包含非法字符: ${dev}" >&2
+        return 1
+    fi
+    local dangerous_pattern='[;&|`$(){}]'
+    if [[ "${dev}" =~ $dangerous_pattern ]]; then
+        echo "ERROR: 设备名包含潜在危险字符: ${dev}" >&2
+        return 1
+    fi
+    return 0
+}
+
+debug_log() {
+    if [[ "${DEBUG}" == "1" ]]; then
+        echo "[DEBUG] $(date '+%Y-%m-%d %H:%M:%S') $*" >&2
+    fi
+}
+
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    ensure_directories
+fi

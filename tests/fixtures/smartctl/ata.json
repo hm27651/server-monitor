@@ -1,0 +1,63 @@
+{
+  "smartctl": {
+    "exit_status": 0
+  },
+  "smart_status": {
+    "passed": true
+  },
+  "power_on_time": {
+    "hours": 1234
+  },
+  "ata_smart_attributes": {
+    "table": [
+      {
+        "id": 5,
+        "name": "Reallocated_Sector_Ct",
+        "raw": {
+          "value": 0
+        },
+        "current": 100
+      },
+      {
+        "id": 9,
+        "name": "Power_On_Hours",
+        "raw": {
+          "value": 1234
+        },
+        "current": 99
+      },
+      {
+        "id": 194,
+        "name": "Temperature_Celsius",
+        "raw": {
+          "value": 36
+        },
+        "current": 64
+      },
+      {
+        "id": 197,
+        "name": "Current_Pending_Sector",
+        "raw": {
+          "value": 0
+        },
+        "current": 100
+      },
+      {
+        "id": 198,
+        "name": "Offline_Uncorrectable",
+        "raw": {
+          "value": 0
+        },
+        "current": 100
+      },
+      {
+        "id": 199,
+        "name": "UDMA_CRC_Error_Count",
+        "raw": {
+          "value": 2
+        },
+        "current": 200
+      }
+    ]
+  }
+}

@@ -1,0 +1,5 @@
+SMART Health Status: OK
+
+Current Drive Temperature:     31 C
+Accumulated power on time, hours:minutes 1000:00
+Elements in grown defect list: 4
